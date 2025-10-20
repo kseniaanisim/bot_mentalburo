@@ -116,6 +116,10 @@ async def flush_album_later(key: Tuple[int, str], any_message: types.Message):
 # ───────────── Одиночные сообщения (copy_message) ─────────────
 @dp.message()
 async def on_any_message(message: types.Message):
+    # если сообщение пришло не из личного чата — игнорируем
+    if message.chat.id == ADMIN_CHAT_ID or message.chat.type != "private":
+        return
+
     # подтверждение пользователю
     await message.answer("Сообщение получено, спасибо! 🌄")
 
