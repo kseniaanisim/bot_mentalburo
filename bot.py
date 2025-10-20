@@ -51,6 +51,7 @@ def reply_keyboard(user_id: int) -> InlineKeyboardMarkup:
 def admin_caption(prefix: str, text: str) -> str:
     return f"{prefix}\n\n{text}" if text else prefix
 
+
 # ─────────────────── Команды ─────────────────────
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -64,9 +65,14 @@ async def cmd_start(message: types.Message):
 async def cmd_here(message: types.Message):
     await message.answer(f"chat id: {message.chat.id}")
 
+
 # ───────────── Альбомы (media_group) ─────────────
 @dp.message(F.media_group_id)
 async def on_album_part(message: types.Message):
+    # не реагировать, если это чат предложки
+    if message.chat.id == ADMIN_CHAT_ID or message.chat.type != "private":
+        return
+
     await message.answer("Сообщение получено, спасибо! 🌄")
 
     key = (message.chat.id, str(message.media_group_id))
@@ -87,6 +93,7 @@ async def on_album_part(message: types.Message):
     if not album_timer_running.get(key):
         album_timer_running[key] = True
         asyncio.create_task(flush_album_later(key, message))
+
 
 async def flush_album_later(key: Tuple[int, str], any_message: types.Message):
     await asyncio.sleep(ALBUM_FLUSH_DELAY)
@@ -113,6 +120,7 @@ async def flush_album_later(key: Tuple[int, str], any_message: types.Message):
     except Exception as e:
         log.exception(f"Ошибка при отправке альбома в админ-чат: {e}")
 
+
 # ───────────── Одиночные сообщения (copy_message) ─────────────
 @dp.message()
 async def on_any_message(message: types.Message):
@@ -123,30 +131,29 @@ async def on_any_message(message: types.Message):
     # подтверждение пользователю
     await message.answer("Сообщение получено, спасибо! 🌄")
 
-    # 1) Копируем ОРИГИНАЛЬНОЕ сообщение как есть (любой тип вложений)
+    ts = (message.date + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
+    header = f"📩 Новое анонимное сообщение\n🕓 {ts}"
+    user_id = message.from_user.id
+    caption_text = message.caption or message.text or "📎 Пользователь отправил файл"
+    caption_full = f"{header}\n\n{caption_text}"
+
     try:
+        # пересылаем оригинал как есть с кнопкой
         await bot.copy_message(
             chat_id=ADMIN_CHAT_ID,
             from_chat_id=message.chat.id,
             message_id=message.message_id,
-        )
-    except Exception as e:
-        log.exception(f"copy_message провалился: {e}")
-
-    # 2) Отдельно отправляем заголовок + кнопку «Ответить»
-    ts = (message.date + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
-    header = f"📩 Новое анонимное сообщение\n🕓 {ts}"
-    user_id = message.from_user.id
-    text = message.text or message.caption or "📎 Пользователь отправил файл"
-
-    try:
-        await bot.send_message(
-            ADMIN_CHAT_ID,
-            admin_caption(header, text),
             reply_markup=reply_keyboard(user_id),
         )
     except Exception as e:
-        log.exception(f"Ошибка при отправке сообщения в админ-чат: {e}")
+        log.exception(f"copy_message провалился: {e}")
+        # fallback: просто текст
+        await bot.send_message(
+            ADMIN_CHAT_ID,
+            caption_full,
+            reply_markup=reply_keyboard(user_id),
+        )
+
 
 # ───────────── Кнопки и ответы администратора ─────────────
 @dp.callback_query(F.data.startswith("reply:"))
@@ -160,10 +167,12 @@ async def cb_reply(callback: types.CallbackQuery):
     await callback.message.reply("Напиши ответ пользователю ниже одним сообщением. «Отмена» — чтобы выйти.")
     await callback.answer("Режим ответа включён.")
 
+
 @dp.callback_query(F.data == "cancel")
 async def cb_cancel(callback: types.CallbackQuery):
     reply_targets.pop(callback.from_user.id, None)
     await callback.answer("Отмена.")
+
 
 @dp.message(F.chat.id == ADMIN_CHAT_ID)
 async def on_admin_chat_message(message: types.Message):
@@ -217,9 +226,11 @@ async def on_admin_chat_message(message: types.Message):
     else:
         await message.reply("❌ Ошибка при отправке. Попробуй ещё раз.")
 
+
 # ─────────────────────── запуск ───────────────────────
 async def main():
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
